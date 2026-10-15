@@ -1,27 +1,37 @@
-import React, {useEffect, useState} from "react";
-import axios from "axios";
+import { useEffect, useState } from 'react';
+import axios from 'axios';
 
-export default function Sidebar({onSelectConversation}){
-  const [convs, setConvs] = useState([]);
-  useEffect(()=>{ axios.get("/api/conversations").then(r=>setConvs(r.data)); }, []);
+export default function Sidebar({
+  conversations,
+  onSelectConversation,
+  onNewConversation,
+  onOpenSettings,
+  onOpenTools,
+  onDeleteConversation,
+}) {
   return (
     <aside className="sidebar">
-      <div className="sidebar-top">
-        <h2>VELVOR</h2>
-        <button onClick={()=>{/* open settings modal */}}>⚙️</button>
+      <div className="sidebar-header">
+        <span className="brand">VELVOR</span>
+        <button className="icon-button" onClick={onOpenSettings}>⚙️</button>
       </div>
-      <div className="conversations">
-        {convs.map(c => (
-          <div key={c.id} className="conv-item">
-            <button onClick={()=>onSelectConversation(c.id)}>{c.title}</button>
-            <button onClick={()=>{ axios.delete(`/api/conversations/${c.id}`).then(()=>setConvs(convs.filter(x=>x.id!==c.id)))}}>🗑</button>
+
+      <button className="new-chat" onClick={onNewConversation}>+ New Chat</button>
+
+      <div className="conversation-list">
+        {conversations.map((conversation) => (
+          <div key={conversation.id} className="conv-item">
+            <button className="conv-button" onClick={() => onSelectConversation(conversation.id)}>
+              {conversation.title || 'Untitled'}
+            </button>
+            <button className="delete-btn" onClick={() => onDeleteConversation(conversation.id)}>🗑</button>
           </div>
         ))}
       </div>
-      <div className="tools-ui">
-        <h3>Tools</h3>
-        <button onClick={()=>{/* open tools manager */}}>Open Tools</button>
+
+      <div style={{ marginTop: 18 }}>
+        <button className="secondary-btn" style={{ width: '100%' }} onClick={onOpenTools}>📦 Tools</button>
       </div>
     </aside>
-  )
+  );
 }

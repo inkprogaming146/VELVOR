@@ -1,28 +1,29 @@
-# VELVOR — offline "vibe coding" AI agent (starter)
+# VELVOR
 
-Overview
-- Local-first coding assistant with chat, tools-as-python-scripts, live editor, terminal, and settings.
-- Offline LLM support via llama.cpp / llama-cpp-python (GGML).
-- Frontend: React + Tailwind + Monaco + xterm.js
-- Backend: FastAPI + SQLite
-- Code execution sandboxed locally (resource limits). No API keys required.
+VELVOR is a local-first AI coding companion designed for offline, vibe-driven development.
 
-Quick start (prototype)
-1) Install system deps:
-   - Linux: git, python3.11, nodejs, npm, build-essential
-2) Backend:
+Highlights
+- Chat UI with conversations and delete support
+- Settings panel for username, light/dark mode, and color themes
+- Tool generation and local execution as Python scripts
+- Workspace files and live editor
+- Prompt snippet library hidden behind the chat menu
+- Local backend using FastAPI with a local LLM adapter and sandboxed Python runner
+
+Run locally
+1. Start the backend:
    cd backend
    python -m venv .venv
    source .venv/bin/activate
    pip install -r requirements.txt
-   # Place a compatible GGML model at backend/models/ggml-model.bin
    uvicorn main:app --host 127.0.0.1 --port 8000
-3) Frontend:
+
+2. Start the frontend:
    cd frontend
    npm install
    npm run dev
-4) Run with Docker (recommended for isolation):
-   docker-compose up --build --abort-on-container-exit
-Notes
-- Models must be downloaded separately (see docs/model-recommendations.md).
-- To run fully offline, run docker-compose with network: none or start services with no network.
+
+3. Open http://localhost:5173
+
+Note
+- VELVOR is designed to operate fully offline. To use the full local LLM, add a compatible GGML model at backend/models/ggml-model.bin.

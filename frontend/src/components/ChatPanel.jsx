@@ -1,29 +1,103 @@
-import React, {useState, useEffect} from "react";
-import axios from "axios";
+import { useEffect, useState } from 'react';
+import axios from 'axios';
 
-export default function ChatPanel({conversationId}){
+export default function ChatPanel({ conversationId, username, onRefreshConversations, onSelectFile }) {
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState('');
+  const [snippetsOpen, setSnippetsOpen] = useState(false);
+  const [snippets, setSnippets] = useState([]);
+  const [snippetTitle, setSnippetTitle] = useState('New Prompt');
+  const [snippetBody, setSnippetBody] = useState('');
 
-  useEffect(()=>{
-    // load conversation messages if needed
+  const loadConversation = async (id) => {
+    if (!id) {
+      setMessages([]);
+      return;
+    }
+    const { data } = await axios.get(`/api/conversation/${id}`);
+    setMessages(data.messages || []);
+  };
+
+  const loadSnippets = async () => {
+    const { data } = await axios.get('/api/snippets');
+    setSnippets(data);
+  };
+
+  useEffect(() => {
+    loadConversation(conversationId);
   }, [conversationId]);
 
-  const send = async ()=>{
-    const res = await axios.post('/api/chat', {conversation_id: conversationId, prompt: input});
-    setMessages([...messages, {role:'user',text:input}, {role:'assistant',text:res.data.response}]);
-    setInput("");
-  }
+  useEffect(() => {
+    loadSnippets();
+  }, []);
+
+  const sendPrompt = async () => {
+    if (!input.trim()) return;
+    const trimmed = input.trim();
+    setInput('');
+    const { data } = await axios.post('/api/chat', { conversation_id: conversationId, prompt: trimmed });
+    setMessages((prev) => [...prev, { role: 'user', text: trimmed }, { role: 'assistant', text: data.response }]);
+    onRefreshConversations();
+    onSelectFile('README.md');
+  };
+
+  const saveSnippet = async () => {
+    await axios.post('/api/snippets', { title: snippetTitle || 'New snippet', body: snippetBody || '' });
+    setSnippetBody('');
+    setSnippetTitle('New snippet');
+    loadSnippets();
+  };
 
   return (
-    <div className="chat-panel">
-      <div className="messages">
-        {messages.map((m,i)=>(<div key={i} className={m.role}>{m.text}</div>))}
+    <section className="chat-panel relative">
+      <div className="chat-header">
+        <h2>{username}'s workspace</h2>
+        <button className="icon-button" onClick={() => setSnippetsOpen((v) => !v)}>⋯</button>
       </div>
-      <div className="input-area">
-        <input value={input} onChange={e=>setInput(e.target.value)} placeholder="Say something..." />
-        <button onClick={send}>Send</button>
+
+      {snippetsOpen && (
+        <div className="snippet-menu">
+          <div className="field">
+            <label>Snippet title</label>
+            <input value={snippetTitle} onChange={(e) => setSnippetTitle(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Prompt body</label>
+            <textarea rows={4} value={snippetBody} onChange={(e) => setSnippetBody(e.target.value)} />
+          </div>
+          <div className="row-actions">
+            <button className="secondary-btn" onClick={() => setSnippetsOpen(false)}>Close</button>
+            <button className="primary-btn" onClick={saveSnippet}>Save</button>
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            {snippets.map((snippet) => (
+              <div key={snippet.id} className="tool-item" style={{ marginBottom: 8 }}>
+                <strong>{snippet.title}</strong>
+                <button className="secondary-btn" onClick={() => { setInput(snippet.body); setSnippetsOpen(false); }}>Use</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="chat-messages">
+        {messages.map((msg, index) => (
+          <div key={`${msg.role}-${index}`} className={`message ${msg.role}`}>
+            {msg.text}
+          </div>
+        ))}
       </div>
-    </div>
+
+      <div className="chat-input-row">
+        <input
+          value={input}
+          placeholder="Ask VELVOR to build an app, script, or feature..."
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && sendPrompt()}
+        />
+        <button className="primary-btn" onClick={sendPrompt}>Send</button>
+      </div>
+    </section>
   );
 }

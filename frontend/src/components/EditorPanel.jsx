@@ -1,16 +1,62 @@
-import React, {useEffect, useRef} from "react";
-import * as monaco from "monaco-editor";
+import { useEffect, useState } from 'react';
+import axios from 'axios';
 
-export default function EditorPanel(){
-  const ref = useRef(null);
-  useEffect(()=>{
-    const editor = monaco.editor.create(ref.current, {
-      value: "# Open a tool to edit\n",
-      language: "python",
-      theme: "vs-dark",
-      minimap: { enabled: false }
-    });
-    return ()=>editor.dispose();
+export default function EditorPanel({ filePath, onFileSelect, mode }) {
+  const [projectFiles, setProjectFiles] = useState([]);
+  const [content, setContent] = useState('');
+  const [currentPath, setCurrentPath] = useState(filePath || 'README.md');
+
+  const loadTree = async () => {
+    const { data } = await axios.get('/api/project/tree');
+    const files = data.filter((entry) => entry.type === 'file').map((entry) => entry.path);
+    setProjectFiles(files.slice(0, 30));
+  };
+
+  const loadFile = async (path) => {
+    const { data } = await axios.get('/api/file', { params: { path } });
+    setCurrentPath(path);
+    setContent(data.content);
+  };
+
+  useEffect(() => {
+    loadTree();
   }, []);
-  return <div className="editor-panel" ref={ref} style={{height:"60vh"}} />;
+
+  useEffect(() => {
+    if (filePath) {
+      loadFile(filePath);
+    }
+  }, [filePath]);
+
+  const save = async () => {
+    await axios.post('/api/file', null, { params: { path: currentPath, content } });
+  };
+
+  return (
+    <section className="editor-shell">
+      <div className="file-toolbar">
+        <strong>{currentPath}</strong>
+        <button className="primary-btn" onClick={save}>Save</button>
+      </div>
+
+      <div className="file-list">
+        {projectFiles.map((path) => (
+          <button key={path} className="file-chip" onClick={() => {
+            onFileSelect(path);
+            loadFile(path);
+          }}>
+            {path}
+          </button>
+        ))}
+      </div>
+
+      <div className="editor-wrap">
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          spellCheck={false}
+        />
+      </div>
+    </section>
+  );
 }
