@@ -1,0 +1,9 @@
+# Byte-level files, build artifacts
+venv/
+node_modules/
+dist/
+.env
+*.pyc
+__pycache__/
+workspace/**
+backend/models/**

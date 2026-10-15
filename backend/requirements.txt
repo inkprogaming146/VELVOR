@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+pydantic
+llama-cpp-python
+python-multipart
+aiofiles
+starlette
+rich
