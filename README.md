@@ -1,29 +1,15 @@
-# VELVOR
+## Project memory and preview
 
-VELVOR is a local-first AI coding companion designed for offline, vibe-driven development.
+New features added in the `velvor/starter` branch:
 
-Highlights
-- Chat UI with conversations and delete support
-- Settings panel for username, light/dark mode, and color themes
-- Tool generation and local execution as Python scripts
-- Workspace files and live editor
-- Prompt snippet library hidden behind the chat menu
-- Local backend using FastAPI with a local LLM adapter and sandboxed Python runner
+- Project memory (searchable file index):
+  - POST /api/memory/index — indexes allowed workspace and repo files into an SQLite FTS5 table.
+  - GET  /api/memory/search?q=... — search indexed files with FTS and return snippets.
+- Preview mode:
+  - POST /api/preview/build — runs `npm run build` in the frontend directory and copies the build output (`dist/`) into `workspace/preview/`.
+  - Static preview served at `http://localhost:8000/preview/` when the backend is running.
 
-Run locally
-1. Start the backend:
-   cd backend
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   uvicorn main:app --host 127.0.0.1 --port 8000
-
-2. Start the frontend:
-   cd frontend
-   npm install
-   npm run dev
-
-3. Open http://localhost:5173
-
-Note
-- VELVOR is designed to operate fully offline. To use the full local LLM, add a compatible GGML model at backend/models/ggml-model.bin.
+Usage notes:
+- Building requires Node + npm installed on your machine and may take a short while.
+- To update the memory index after changing files, call POST /api/memory/index.
+- The preview endpoint invokes `npm run build` and will fail if the frontend has build errors.

@@ -4,17 +4,19 @@ from sqlmodel import Field, SQLModel, Session, create_engine, select
 from pydantic import BaseModel
 from pathlib import Path
 from typing import Optional, Dict
-import json, time, uuid
+import json, time, uuid, sqlite3, shutil, subprocess, os
 
 from llama_adapter import LlamaAdapter
 from run_tool import run_python_sandbox
+from fastapi.staticfiles import StaticFiles
 
 BACKEND_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BACKEND_DIR.parent
 DB_FILE = BACKEND_DIR / "velvor.db"
 WORKSPACE_DIR = ROOT_DIR / "workspace"
 TOOLS_DIR = WORKSPACE_DIR / "tools"
-PROJECT_ROOT = ROOT_DIR
+PREVIEW_DIR = WORKSPACE_DIR / "preview"
+FRONTEND_DIR = ROOT_DIR / "frontend"
 
 DEFAULT_SETTINGS = {
     "username": "Creator",
@@ -31,6 +33,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve preview static files from /preview if present
+PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/preview", StaticFiles(directory=str(PREVIEW_DIR), html=True), name="preview")
 
 
 class Conversation(SQLModel, table=True):
@@ -66,6 +72,10 @@ class ChatRequest(BaseModel):
     prompt: str
 
 
+class TerminalCommandRequest(BaseModel):
+    command: str
+
+
 engine = create_engine(f"sqlite:///{DB_FILE}")
 SQLModel.metadata.create_all(engine)
 
@@ -73,10 +83,94 @@ SQLModel.metadata.create_all(engine)
 def ensure_workspace():
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 
 
 ensure_workspace()
 llm = LlamaAdapter(str(BACKEND_DIR / "models" / "ggml-model.bin"))
+
+
+# --- Project memory (FTS5) helpers ---
+def _ensure_fts():
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    try:
+        # Create virtual table for fast text search over files
+        cur.execute("CREATE VIRTUAL TABLE IF NOT EXISTS file_index USING fts5(path, content)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def index_project_files():
+    _ensure_fts()
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    # Clear previous index
+    cur.execute("DELETE FROM file_index;")
+
+    allowed_ext = {'.py', '.js', '.jsx', '.ts', '.tsx', '.html', '.md', '.txt', '.json', '.css'}
+    count = 0
+    for path in sorted(ROOT_DIR.rglob("*")):
+        if ".git" in path.parts or ".venv" in path.parts or "node_modules" in path.parts:
+            continue
+        if path.is_file() and path.suffix.lower() in allowed_ext:
+            try:
+                text = path.read_text(encoding='utf-8', errors='ignore')
+                rel = path.relative_to(ROOT_DIR).as_posix()
+                cur.execute("INSERT INTO file_index(path, content) VALUES (?, ?)", (rel, text))
+                count += 1
+            except Exception:
+                continue
+    conn.commit()
+    conn.close()
+    return count
+
+
+def search_project_memory(query: str, limit: int = 10):
+    _ensure_fts()
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    # Use FTS5 MATCH; wrap tokenization for simple queries
+    q = ' '.join(query.strip().split())
+    try:
+        cur.execute("SELECT path, snippet(file_index, -1, '<b>', '</b>', '...', 64) as snippet FROM file_index WHERE file_index MATCH ? LIMIT ?", (q, limit))
+        rows = cur.fetchall()
+        return [{'path': r[0], 'snippet': r[1]} for r in rows]
+    except Exception:
+        # Fallback: simple LIKE search
+        cur.execute("SELECT path, substr(content, 1, 300) FROM file_index WHERE content LIKE ? LIMIT ?", (f'%{query}%', limit))
+        rows = cur.fetchall()
+        return [{'path': r[0], 'snippet': r[1]} for r in rows]
+    finally:
+        conn.close()
+
+
+# --- Preview / build helper ---
+def build_frontend_preview():
+    # Run npm build in frontend dir, copy dist to workspace/preview
+    if not FRONTEND_DIR.exists():
+        return {'ok': False, 'error': 'frontend directory not found'}
+
+    cmd = ["npm", "run", "build"]
+    try:
+        proc = subprocess.Popen(cmd, cwd=str(FRONTEND_DIR), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        out, err = proc.communicate(timeout=180)
+        if proc.returncode != 0:
+            return {'ok': False, 'error': err or out}
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return {'ok': False, 'error': 'build timed out'}
+
+    dist = FRONTEND_DIR / 'dist'
+    if not dist.exists():
+        return {'ok': False, 'error': 'build did not produce dist/ folder'}
+
+    # copy to PREVIEW_DIR
+    if PREVIEW_DIR.exists():
+        shutil.rmtree(PREVIEW_DIR)
+    shutil.copytree(dist, PREVIEW_DIR)
+    return {'ok': True}
 
 
 @app.get("/api/health")
@@ -293,3 +387,47 @@ def delete_snippet(snippet_id: int):
             s.delete(snippet)
             s.commit()
     return {"ok": True}
+
+
+@app.post("/api/terminal/run")
+def terminal_run(req: TerminalCommandRequest):
+    command = req.command.strip()
+    if not command:
+        return {"stdout": "", "stderr": "No command supplied", "exit_code": 1}
+
+    try:
+        proc = subprocess.Popen(
+            command,
+            shell=True,
+            cwd=str(ROOT_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout, stderr = proc.communicate(timeout=30)
+        return {"stdout": stdout, "stderr": stderr, "exit_code": proc.returncode}
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return {"stdout": "", "stderr": "Command timed out after 30s", "exit_code": -1}
+
+
+# --- New endpoints: project memory and preview ---
+@app.post("/api/memory/index")
+def memory_index():
+    count = index_project_files()
+    return {"indexed_files": count}
+
+
+@app.get("/api/memory/search")
+def memory_search(q: str):
+    results = search_project_memory(q)
+    return {"query": q, "results": results}
+
+
+@app.post("/api/preview/build")
+def preview_build():
+    res = build_frontend_preview()
+    if not res.get('ok'):
+        raise HTTPException(status_code=500, detail=res.get('error', 'build failed'))
+    # return URL where preview will be served
+    return {"preview_url": "/preview/", "ok": True}
